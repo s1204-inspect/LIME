@@ -34,14 +34,8 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches/
-            ~/.gradle/wrapper/
-            ./.gradle/
-          key: ${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
       - name: Set environments
         run: |
@@ -51,12 +45,12 @@ jobs:
             echo "repo=$(echo ${GITHUB_REPOSITORY#$GITHUB_REPOSITORY_OWNER/})"
           } >> $GITHUB_ENV
 
-      - name: Check tag exists
-        uses: mukunku/tag-exists-action@v1.6.0
-        if: github.event.inputs.release == 'true'
-        id: check-tag
-        with: 
-          tag: "${{ env.version }}"
+      - name: Get previous tag
+        uses: oprypin/find-latest-tag@v1.1.2
+        id: previous
+        with:
+          repository: ${{ github.repository }}
+          releases-only: true
 
       - name: Release check
         if: github.event.inputs.release == 'true'
@@ -70,7 +64,7 @@ jobs:
             echo ""
             exit 1
           fi
-          if [ "${{ steps.check-tag.outputs.exists }}" == "true" ]; then
+          if [ "${{ steps.previous.outputs.tag }}" == "${{ env.version }}" ]; then
             echo -e "\nERROR!\nThe same tag already exists!\n"
             echo "Please change versionName in build.gradle"
             echo ""
@@ -105,3 +99,10 @@ jobs:
           draft: false
           prerelease: false
           files: ${{ env.repo }}-${{ env.version }}.apk
+          body: |
+            # 更新内容
+            
+            ## 対応するLINEのバージョン
+            
+            ### 差分
+            https://github.com/${{ github.repository }}/compare/${{ steps.previous.outputs.tag }}...${{ env.version }}
