@@ -47,6 +47,7 @@ jobs:
 
       - name: Get previous tag
         uses: oprypin/find-latest-tag@v1.1.2
+        continue-on-error: true
         id: previous
         with:
           repository: ${{ github.repository }}
