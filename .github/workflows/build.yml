@@ -11,6 +11,11 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      lspatch:
+        description: 'LSPatch'
+        type: boolean
+        required: true
+        default: false
       release:
         description: 'Release'
         type: boolean
@@ -43,20 +48,21 @@ jobs:
         run: |
           {
             echo "version=v$(grep versionName app/build.gradle | awk '{print $2}' | tr -d \")"
+            echo "line_ver=$(grep HOOK_TARGET_VERSION app/build.gradle | awk '{print $4}' | tr -d \'\")"
             echo "commit=$(echo ${{ github.sha }} | cut -c-7)"
             echo "repo=$(echo ${GITHUB_REPOSITORY#$GITHUB_REPOSITORY_OWNER/})"
           } >> $GITHUB_ENV
 
       - name: Get previous version name
         uses: oprypin/find-latest-tag@v1.1.2
-        if: github.event.inputs.release
+        if: github.event.inputs.release == 'true'
         id: previous
         with:
           repository: ${{ github.repository }}
           releases-only: true
 
       - name: Release check
-        if: github.event.inputs.release
+        if: github.event.inputs.release == 'true'
         run: |
           if [ "${{ secrets.STORE_FILE }}" == "" ]; then
             echo -e "\nERROR!\nTo release, you need to set up a signing key! \n"
@@ -87,32 +93,52 @@ jobs:
             ./gradlew assembleDebug --no-daemon --stacktrace
           fi
 
-      - name: Attest
-        uses: actions/attest-build-provenance@v1
-        if: github.event.inputs.release != 'true'
-        continue-on-error: true
-        with:
-          subject-path: app/build/outputs/apk/debug/app-debug.apk
+      - name: LSPatch
+        if: github.event.inputs.release == 'true' || github.event.inputs.lspatch == 'true'
+        run: |
+          echo "Downloading LSPatch..."
+          curl -LO# "https://github.com/LSPosed/LSPatch/releases/download/v0.6/jar-v0.6-398-release.jar"
+          echo "Downloading Official LINE APK..."
+          curl -LO# "https://line-android-universal-download.line-scdn.net/line-${{ env.line_ver }}.apk"
+          if [ "${{ inputs.release }}" == "true" ]; then
+            export PATCH_APK="${{ env.repo }}-${{ env.version }}.apk"
+          else
+            export PATCH_APK="app/build/outputs/debug/app-debug.apk"
+          fi
+          echo "Patching LIME..."
+          java -jar jar-v0.6-398-release.jar "line-${{ env.line_ver }}.apk" -m "$PATCH_APK" -l 2
 
-      - name: Upload APK
+      - name: Upload Module APK
         uses: actions/upload-artifact@v4
         if: github.event.inputs.release != 'true'
         with:
-          name: ${{ env.repo }}(${{ env.version }}@${{ env.commit }})
+          name: ${{ env.repo }}-${{ env.version }}@${{ env.commit }}
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload Patched LINE APK
+        uses: actions/upload-artifact@v4
+        if: github.event.inputs.release != 'true' && github.event.inputs.lspatch == 'true'
+        with:
+          name: LINE-${{ env.line_ver }}-lspatched(${{ env.repo }}-${{ env.version }}@${{ env.commit }})
+          path: line-${{ env.line_ver }}-398-lspatched.apk
+          if-no-files-found: error
 
       - name: Release
         uses: softprops/action-gh-release@v2
-        if: github.event.inputs.release
+        if: github.event.inputs.release == 'true'
         with:
           tag_name: ${{ env.version }}
           draft: false
           prerelease: false
-          files: ${{ env.repo }}-${{ env.version }}.apk
+          files: |
+            ${{ env.repo }}-${{ env.version }}.apk
+            line-${{ env.line_ver }}-398-lspatched.apk
           body: |
             # 更新内容
-            
+
             ## 対応するLINEのバージョン
-            
+            ${{ env.line_ver }}
+
             ### 差分
             https://github.com/${{ github.repository }}/compare/${{ steps.previous.outputs.tag }}...${{ env.version }}
