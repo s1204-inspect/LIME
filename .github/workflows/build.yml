@@ -21,6 +21,11 @@ on:
         type: boolean
         required: true
         default: false
+      line_ver:
+        type: string
+        description: Original APK version code
+        required: false
+        default: ""
 
 jobs:
   build:
@@ -32,6 +37,21 @@ jobs:
       attestations: write
     steps:
 
+      - name: Set environments
+        run: |
+          if [ -z "${{ inputs.line_ver }}" ] && { [ "${{ inputs.lspatch }}" == 'true' ] || [ "${{ inputs.release }}" == 'true' ]; }; then
+            echo -e "\nERROR!\nLINE versionCode is needed!\n"
+            echo "Please enter the versionCode of the corresponding APK."
+            echo ""
+            exit 1
+          fi
+          {
+            echo "version=v$(grep versionName app/build.gradle | awk '{print $2}' | tr -d \")"
+            echo "line_ver=$(grep HOOK_TARGET_VERSION app/build.gradle | awk '{print $4}' | tr -d \'\")"
+            echo "commit=$(echo ${{ github.sha }} | cut -c-7)"
+            echo "repo=$(echo ${GITHUB_REPOSITORY#$GITHUB_REPOSITORY_OWNER/})"
+          } >> $GITHUB_ENV
+  
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -43,15 +63,6 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
-
-      - name: Set environments
-        run: |
-          {
-            echo "version=v$(grep versionName app/build.gradle | awk '{print $2}' | tr -d \")"
-            echo "line_ver=$(grep HOOK_TARGET_VERSION app/build.gradle | awk '{print $4}' | tr -d \'\")"
-            echo "commit=$(echo ${{ github.sha }} | cut -c-7)"
-            echo "repo=$(echo ${GITHUB_REPOSITORY#$GITHUB_REPOSITORY_OWNER/})"
-          } >> $GITHUB_ENV
 
       - name: Get previous version name
         uses: oprypin/find-latest-tag@v1.1.2
@@ -65,7 +76,7 @@ jobs:
         if: github.event.inputs.release == 'true'
         run: |
           if [ "${{ secrets.STORE_FILE }}" == "" ]; then
-            echo -e "\nERROR!\nTo release, you need to set up a signing key! \n"
+            echo -e "\nERROR!\nTo release, you need to set up a signing key!\n"
             echo "STORE_FILE: A Base64 encoded string of the signing key in JKS format"
             echo "STORE_PASSWORD: Key store password"
             echo "KEY_ALIAS: Key alias"
@@ -96,17 +107,17 @@ jobs:
       - name: LSPatch
         if: github.event.inputs.release == 'true' || github.event.inputs.lspatch == 'true'
         run: |
-          echo "Downloading LSPatch..."
-          curl -LO# "https://github.com/LSPosed/LSPatch/releases/download/v0.6/jar-v0.6-398-release.jar"
-          echo "Downloading Official LINE APK..."
-          curl -LO# "https://line-android-universal-download.line-scdn.net/line-${{ env.line_ver }}.apk"
-          if [ "${{ inputs.release }}" == "true" ]; then
-            export PATCH_APK="${{ env.repo }}-${{ env.version }}.apk"
-          else
-            export PATCH_APK="app/build/outputs/debug/app-debug.apk"
-          fi
+          cat <<EOF > conf
+          https://github.com/LSPosed/LSPatch/releases/download/v0.6/jar-v0.6-398-release.jar
+            out=lspatch.jar
+          https://d.apkpure.net/b/APK/jp.naver.line.android?versionCode=${{ inputs.line_ver }}&nc=arm64-v8a%2Carmeabi-v7a&sv=28
+            out=line-${{ env.line_ver }}.apk
+          EOF
+          echo "Downloading APK..."
+          aria2c --no-conf -x16 -s16 -R -m0 -V --async-dns=false -iconf
+          export PATCH_APK=$([ "${{ inputs.release }}" == "true" ] && echo "${{ env.repo }}-${{ env.version }}.apk" || echo "app/build/outputs/apk/debug/app-debug.apk")
           echo "Patching LIME..."
-          java -jar jar-v0.6-398-release.jar "line-${{ env.line_ver }}.apk" -m "$PATCH_APK" -l 2
+          java -jar lspatch.jar "line-${{ env.line_ver }}.apk" -m "$PATCH_APK" -l 2 -v
 
       - name: Upload Module APK
         uses: actions/upload-artifact@v4
@@ -120,7 +131,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: github.event.inputs.release != 'true' && github.event.inputs.lspatch == 'true'
         with:
-          name: LINE-${{ env.line_ver }}-lspatched(${{ env.repo }}-${{ env.version }}@${{ env.commit }})
+          name: LINE-${{ env.line_ver }}@${{ env.commit }}
           path: line-${{ env.line_ver }}-398-lspatched.apk
           if-no-files-found: error
 
@@ -136,9 +147,9 @@ jobs:
             line-${{ env.line_ver }}-398-lspatched.apk
           body: |
             # 更新内容
-
+            
             ## 対応するLINEのバージョン
             ${{ env.line_ver }}
-
+            
             ### 差分
             https://github.com/${{ github.repository }}/compare/${{ steps.previous.outputs.tag }}...${{ env.version }}
