@@ -37,6 +37,9 @@ jobs:
       attestations: write
     steps:
 
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Set environments
         run: |
           if [ -z "${{ inputs.line_ver }}" ] && { [ "${{ inputs.lspatch }}" == 'true' ] || [ "${{ inputs.release }}" == 'true' ]; }; then
@@ -52,9 +55,6 @@ jobs:
             echo "repo=$(echo ${GITHUB_REPOSITORY#$GITHUB_REPOSITORY_OWNER/})"
           } >> $GITHUB_ENV
   
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
